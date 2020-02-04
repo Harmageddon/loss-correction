@@ -413,10 +413,11 @@ class LSTMModel(KerasModel):
 class NoiseEstimator():
 
     def __init__(self, classifier, row_normalize=True, alpha=0.0,
-                 filter_outlier=False, cliptozero=False, verbose=0):
+                 filter_outlier=False, cliptozero=False, verbose=0, estimate_by_top=0.):
         """classifier: an ALREADY TRAINED model. In the ideal case, classifier
         should be powerful enough to only make mistakes due to label noise."""
 
+        self.estimate_by_top = estimate_by_top
         self.classifier = classifier
         self.row_normalize = row_normalize
         self.alpha = alpha
@@ -435,18 +436,27 @@ class NoiseEstimator():
 
         # find a 'perfect example' for each class
         for i in np.arange(c):
+            if self.estimate_by_top > 0:
+                in_class_idx = np.argmax(eta_corr, axis=1) == i
+                eta_class = eta_corr[in_class_idx]
+                eta_sorted = eta_class[np.argsort(eta_class[:, i])]
+                top_n = int(np.floor((1 - self.estimate_by_top) * len(eta_sorted)))
+                eta_top = eta_sorted[top_n:]
+                T[i, :] = np.mean(eta_top, axis=0)
+                print('Used {:d} top predictions for estimation of T.'.format(len(eta_top)))
 
-            if not self.filter_outlier:
-                idx_best = np.argmax(eta_corr[:, i])
             else:
-                eta_thresh = np.percentile(eta_corr[:, i], 97,
-                                           interpolation='higher')
-                robust_eta = eta_corr[:, i]
-                robust_eta[robust_eta >= eta_thresh] = 0.0
-                idx_best = np.argmax(robust_eta)
+                if not self.filter_outlier:
+                    idx_best = np.argmax(eta_corr[:, i])
+                else:
+                    eta_thresh = np.percentile(eta_corr[:, i], 97,
+                                               interpolation='higher')
+                    robust_eta = eta_corr[:, i]
+                    robust_eta[robust_eta >= eta_thresh] = 0.0
+                    idx_best = np.argmax(robust_eta)
 
-            for j in np.arange(c):
-                T[i, j] = eta_corr[idx_best, j]
+                for j in np.arange(c):
+                    T[i, j] = eta_corr[idx_best, j]
 
         self.T = T
         return self
